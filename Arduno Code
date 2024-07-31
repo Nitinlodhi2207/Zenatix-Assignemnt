@@ -1,0 +1,91 @@
+// The tradition way of making the program will block the code for 1 minute as we have to update Data on every 1 minute 
+// but in that 1 minute interval, we an miss number of people who will enter or exit the Hall.
+// but below approch is non - blocking code approch it will continuousaly check people entered or exited in hall.
+// and update the data on every 1 minute on Serial monitor.
+#include <Arduino.h>
+
+#define TEMP_SENSOR_PIN A5    // temperature sensor analog input pin
+#define ENTRY_PIR_PIN 2       // entry door PIR sensor pin
+#define EXIT_PIR_PIN 3        // exit door PIR sensor pin
+#define CHILLER_SWITCH_PIN 4  // chiller control pin (using an LED as reference)
+#define ALARM_PIN 5           // alarm buzzer pin
+
+struct HallStatus {
+  float Temperature_of_hall;  
+  bool Chiller_power_status;
+  int No_of_people_in_hall;
+};
+HallStatus hallStatus;
+unsigned long previous_tempMillis = 0;
+const unsigned long temp_interval = 60000;
+// this function will return temperature in float
+float readTemperature() {
+  const float BETA = 3950;
+  int analogValue = analogRead(TEMP_SENSOR_PIN);
+  float celsius = 1 / (log(1 / (1023.0 / analogValue - 1)) / BETA + 1.0 / 298.15) - 273.15;  // i applied the conversion as per Wokwi website instruction
+  return celsius;
+}
+// this funtion will update chiller status
+void updateChillerStatus() {
+  if (hallStatus.Temperature_of_hall > 25.0) {
+    digitalWrite(CHILLER_SWITCH_PIN, HIGH);
+    hallStatus.Chiller_power_status = true;
+  } else if (hallStatus.Temperature_of_hall < 24.0) {
+    digitalWrite(CHILLER_SWITCH_PIN, LOW);
+    hallStatus.Chiller_power_status = false;
+  }
+}
+// function for checking people count and alarm status
+void updatePeopleCount() {
+  static int lastEntryPIRState = LOW;
+  static int lastExitPIRState = LOW;
+  int entryPIRState = digitalRead(ENTRY_PIR_PIN);
+  int exitPIRState = digitalRead(EXIT_PIR_PIN);
+  if (entryPIRState == HIGH && lastEntryPIRState == LOW) {
+    delay(200);
+    if (digitalRead(ENTRY_PIR_PIN) == HIGH) {
+      hallStatus.No_of_people_in_hall++;
+    }
+  }
+  lastEntryPIRState = entryPIRState;
+  if (exitPIRState == HIGH && lastExitPIRState == LOW) {
+    delay(200);
+    if (digitalRead(EXIT_PIR_PIN) == HIGH) {
+      hallStatus.No_of_people_in_hall--;
+    }
+  }
+  lastExitPIRState = exitPIRState;
+  if (hallStatus.No_of_people_in_hall >= 100) {
+    digitalWrite(ALARM_PIN, HIGH);
+  } else if (hallStatus.No_of_people_in_hall < 90) {
+    digitalWrite(ALARM_PIN, LOW);
+  }
+}
+
+void publishData() {
+  Serial.print("Temperature: ");
+  Serial.print(hallStatus.Temperature_of_hall);
+  Serial.print(" °C, Chiller Power: ");
+  Serial.print(hallStatus.Chiller_power_status ? "ON" : "OFF");
+  Serial.print(", People Count: ");
+  Serial.println(hallStatus.No_of_people_in_hall);
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(CHILLER_SWITCH_PIN, OUTPUT);
+  pinMode(ALARM_PIN, OUTPUT);
+  pinMode(ENTRY_PIR_PIN, INPUT);
+  pinMode(EXIT_PIR_PIN, INPUT);
+}
+
+void loop() {
+  unsigned long current_millis = millis();
+  if (current_millis - previous_tempMillis >= temp_interval) {
+    previous_tempMillis = current_millis;
+    hallStatus.Temperature_of_hall = readTemperature();
+    updateChillerStatus();
+    publishData();
+  }
+  updatePeopleCount();
+}
